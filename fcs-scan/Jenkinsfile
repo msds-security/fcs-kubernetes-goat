@@ -85,7 +85,7 @@ pipeline {
                 "$FALCON_API_URL" "$FCS_BIN_DIR" "$FCS_CLI_VERSION"
             fi
 
-            "$FCS_BIN_DIR/fcs" --version
+            "$FCS_BIN_DIR/fcs" version
           '''
         }
       }

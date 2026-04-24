@@ -114,4 +114,4 @@ fi
 install -m 0755 "$FCS_BIN" "${INSTALL_DIR}/fcs"
 mkdir -p "$HOME/.crowdstrike/log"
 echo "Installed: ${INSTALL_DIR}/fcs"
-"${INSTALL_DIR}/fcs" --version
+"${INSTALL_DIR}/fcs" version
