@@ -100,12 +100,10 @@ pipeline {
           sh '''
             set -e
             export PATH="$FCS_BIN_DIR:$PATH"
-            fcs configure --help || true
             fcs configure \
               --client-id "$FALCON_CLIENT_ID" \
               --client-secret "$FALCON_CLIENT_SECRET" \
               --falcon-region "$FALCON_CLOUD"
-            fcs configure list
           '''
         }
       }
