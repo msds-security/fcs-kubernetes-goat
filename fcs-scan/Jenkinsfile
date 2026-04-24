@@ -120,7 +120,8 @@ pipeline {
           cd target-repo
           echo "--- FCS IaC scan: $SCAN_PATH ---"
 
-          fcs scan iac "$SCAN_PATH" \
+          fcs scan iac \
+            --path "$SCAN_PATH" \
             --report-formats json,sarif \
             --output-path "$REPORTS_DIR" \
             $UPLOAD_FLAG || IAC_EXIT=$?
