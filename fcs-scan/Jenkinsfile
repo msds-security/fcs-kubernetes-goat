@@ -117,6 +117,18 @@ pipeline {
           UPLOAD_FLAG=""
           [ "$UPLOAD_RESULTS" = "true" ] && UPLOAD_FLAG="--upload-results"
 
+          echo "=== fcs --help ==="
+          fcs --help || true
+          echo ""
+          echo "=== fcs iac --help ==="
+          fcs iac --help || true
+          echo ""
+          echo "=== fcs scan --help ==="
+          fcs scan --help || true
+          echo ""
+          echo "=== fcs scan iac --help ==="
+          fcs scan iac --help || true
+          echo ""
           rm -f "$REPORTS_DIR"/iac-scan.json "$REPORTS_DIR"/iac-scan.sarif
           cd target-repo
           echo "--- FCS IaC scan: $SCAN_PATH ---"
