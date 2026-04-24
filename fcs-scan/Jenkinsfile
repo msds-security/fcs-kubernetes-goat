@@ -151,7 +151,7 @@ pipeline {
             jq -r '.runs[0] | . as $run | ($run.tool.driver.rules | map({(.id): .defaultConfiguration.level}) | add) as $levels | $run.results[]? | "[" + ($levels[.ruleId] // "unknown" | ascii_upcase) + "] " + .ruleId + " | " + (.locations[0].physicalLocation.artifactLocation.uri // "?") + ":" + ((.locations[0].physicalLocation.region.startLine // 0) | tostring) + " | " + .message.text' "$REPORT" || echo "(SARIF parse failed)"
             echo ""
             echo "=== Findings by severity ==="
-            jq -r '.runs[0] | . as $run | ($run.tool.driver.rules | map({(.id): .defaultConfiguration.level}) | add) as $levels | $run.results[]? | ($levels[.ruleId] // "unknown")' "$REPORT" | sort | uniq -c | sort -rn
+            jq -r '.runs[0] | . as $run | ($run.tool.driver.rules | map({(.id): .defaultConfiguration.level}) | add) as $levels | $run.results[]? | ($levels[.ruleId] // "none")' "$REPORT" | sort | uniq -c | sort -rn
           else
             echo "(skipping console findings dump: jq missing or no SARIF report)"
           fi
