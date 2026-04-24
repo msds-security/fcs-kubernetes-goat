@@ -1,0 +1,173 @@
+// ==============================================================================
+// fcs-scan/Jenkinsfile
+// ------------------------------------------------------------------------------
+// Scans the msds-security/fcs-kubernetes-goat repo with the CrowdStrike Falcon
+// Cloud Security (FCS) CLI. IaC scan by default, optional image scans.
+// Requires Jenkins credentials: fcsclient, fcssecret (Secret text)
+// ==============================================================================
+
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'FALCON_CLOUD', choices: ['us-1', 'us-2', 'eu-1', 'us-gov-1', 'us-gov-2'],
+           description: 'Falcon cloud region (must match your tenant).')
+    string(name: 'SCAN_PATH', defaultValue: '.',
+           description: 'Path inside the repo to scan. Use "." for whole repo.')
+    choice(name: 'FAIL_ON_SEVERITY', choices: ['none', 'critical', 'high', 'medium', 'informational'],
+           description: 'Fail the pipeline if findings at or above this severity are found.')
+    booleanParam(name: 'RUN_IMAGE_SCANS', defaultValue: false,
+           description: 'Additionally scan container images referenced in the manifests.')
+    booleanParam(name: 'UPLOAD_RESULTS', defaultValue: true,
+           description: 'Upload scan results to the Falcon console.')
+    string(name: 'FCS_CLI_VERSION', defaultValue: '',
+           description: 'Pin a specific FCS CLI version (e.g., 2.3.0). Empty = latest.')
+  }
+
+  environment {
+    REPO_URL    = 'https://github.com/msds-security/fcs-kubernetes-goat.git'
+    REPO_BRANCH = 'master'
+    REPORTS_DIR = "${WORKSPACE}/fcs-reports"
+    FCS_BIN_DIR = "${WORKSPACE}/.fcs/bin"
+  }
+
+  options {
+    timestamps()
+    timeout(time: 30, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+  }
+
+  stages {
+
+    stage('Checkout scanner code') {
+      steps { checkout scm }
+    }
+
+    stage('Checkout target repo') {
+      steps {
+        dir('target-repo') {
+          git branch: env.REPO_BRANCH, url: env.REPO_URL
+          sh '''
+            echo "--- Target repo ---"
+            git log --oneline -1
+            echo "--- IaC file counts ---"
+            echo "Dockerfiles: $(find . -name 'Dockerfile*' -type f | wc -l)"
+            echo "K8s YAML:    $(find . -name '*.yaml' -o -name '*.yml' | wc -l)"
+            echo "Helm charts: $(find . -name 'Chart.yaml' -type f | wc -l)"
+            echo "Terraform:   $(find . -name '*.tf' -type f | wc -l)"
+          '''
+        }
+      }
+    }
+
+    stage('Install FCS CLI') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'fcsclient', variable: 'FALCON_CLIENT_ID'),
+          string(credentialsId: 'fcssecret', variable: 'FALCON_CLIENT_SECRET'),
+        ]) {
+          sh '''
+            set -e
+            mkdir -p "$FCS_BIN_DIR" "$REPORTS_DIR"
+
+            case "$FALCON_CLOUD" in
+              us-1)     export FALCON_API_URL="https://api.crowdstrike.com" ;;
+              us-2)     export FALCON_API_URL="https://api.us-2.crowdstrike.com" ;;
+              eu-1)     export FALCON_API_URL="https://api.eu-1.crowdstrike.com" ;;
+              us-gov-1) export FALCON_API_URL="https://api.laggar.gcw.crowdstrike.com" ;;
+              us-gov-2) export FALCON_API_URL="https://api.us-gov-2.crowdstrike.us" ;;
+            esac
+            echo "$FALCON_API_URL" > "$WORKSPACE/.fcs/api-url"
+
+            if [ ! -x "$FCS_BIN_DIR/fcs" ]; then
+              bash fcs-scan/scripts/download-fcs-cli.sh \
+                "$FALCON_API_URL" "$FCS_BIN_DIR" "$FCS_CLI_VERSION"
+            fi
+
+            "$FCS_BIN_DIR/fcs" --version
+          '''
+        }
+      }
+    }
+
+    stage('Configure FCS CLI') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'fcsclient', variable: 'FALCON_CLIENT_ID'),
+          string(credentialsId: 'fcssecret', variable: 'FALCON_CLIENT_SECRET'),
+        ]) {
+          sh '''
+            set -e
+            export PATH="$FCS_BIN_DIR:$PATH"
+            fcs configure \
+              --client-id "$FALCON_CLIENT_ID" \
+              --client-secret "$FALCON_CLIENT_SECRET" \
+              --falcon-cloud "$FALCON_CLOUD"
+            fcs configure list
+          '''
+        }
+      }
+    }
+
+    stage('IaC scan') {
+      steps {
+        sh '''
+          set -e
+          export PATH="$FCS_BIN_DIR:$PATH"
+          UPLOAD_FLAG=""
+          [ "$UPLOAD_RESULTS" = "true" ] && UPLOAD_FLAG="--upload-results"
+
+          cd target-repo
+          echo "--- FCS IaC scan: $SCAN_PATH ---"
+
+          fcs scan iac "$SCAN_PATH" --output json $UPLOAD_FLAG > "$REPORTS_DIR/iac-scan.json" || IAC_EXIT=$?
+          fcs scan iac "$SCAN_PATH" --output sarif > "$REPORTS_DIR/iac-scan.sarif" || true
+
+          ls -la "$REPORTS_DIR"
+          exit ${IAC_EXIT:-0}
+        '''
+      }
+    }
+
+    stage('Image scans') {
+      when { expression { params.RUN_IMAGE_SCANS } }
+      steps {
+        sh '''
+          set -e
+          export PATH="$FCS_BIN_DIR:$PATH"
+          UPLOAD_FLAG=""
+          [ "$UPLOAD_RESULTS" = "true" ] && UPLOAD_FLAG="--upload-results"
+
+          cd target-repo
+          grep -rhE '^[[:space:]]*image:[[:space:]]*' --include='*.yaml' --include='*.yml' . \
+            | sed -E 's/^[[:space:]]*image:[[:space:]]*//; s/["]//g' \
+            | sort -u > "$REPORTS_DIR/images.txt" || true
+          find . -name 'Dockerfile*' -type f -exec grep -hE '^FROM ' {} \; \
+            | awk '{print $2}' | sort -u >> "$REPORTS_DIR/images.txt" || true
+          sort -u -o "$REPORTS_DIR/images.txt" "$REPORTS_DIR/images.txt"
+
+          echo "Images to scan:"; cat "$REPORTS_DIR/images.txt" || true
+          mkdir -p "$REPORTS_DIR/images"
+          RC=0
+          while IFS= read -r IMG; do
+            [ -z "$IMG" ] && continue
+            case "$IMG" in *\$*|*{*) continue;; esac
+            SAFE=$(echo "$IMG" | tr '/:@' '___')
+            fcs scan image "$IMG" --output json $UPLOAD_FLAG > "$REPORTS_DIR/images/${SAFE}.json" || RC=$?
+          done < "$REPORTS_DIR/images.txt"
+          exit $RC
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'fcs-reports/**/*', allowEmptyArchive: true, fingerprint: true
+    }
+    cleanup {
+      sh 'rm -rf "$WORKSPACE/.fcs" || true'
+    }
+  }
+}

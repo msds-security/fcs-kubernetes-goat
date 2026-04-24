@@ -1,0 +1,8 @@
+.fcs/
+fcs
+fcs.tar.gz
+fcs_*.tar.gz
+fcs-reports/
+*.sarif
+iac-scan.json
+target-repo/
