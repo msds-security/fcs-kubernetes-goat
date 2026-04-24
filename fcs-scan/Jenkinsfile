@@ -142,6 +142,20 @@ pipeline {
             $UPLOAD_FLAG || IAC_EXIT=$?
 
           ls -la "$REPORTS_DIR"
+
+          # Print findings to the Jenkins console from the SARIF report
+          REPORT=$(ls -t "$REPORTS_DIR"/*-scan-results.sarif 2>/dev/null | head -1)
+          if [ -n "$REPORT" ] && command -v jq >/dev/null 2>&1; then
+            echo ""
+            echo "=== FCS IaC findings ==="
+            jq -r '.runs[0].results[]? | "[" + (.level | ascii_upcase) + "] " + .ruleId + " | " + (.locations[0].physicalLocation.artifactLocation.uri // "?") + ":" + ((.locations[0].physicalLocation.region.startLine // 0) | tostring) + " | " + .message.text' "$REPORT" || echo "(SARIF parse failed)"
+            echo ""
+            echo "=== Findings by severity ==="
+            jq -r '.runs[0].results[]? | .level' "$REPORT" | sort | uniq -c | sort -rn
+          else
+            echo "(skipping console findings dump: jq missing or no SARIF report)"
+          fi
+
           # FCS returns non-zero when findings exist; that's expected for goat.
           # FAIL_ON_SEVERITY gate is not implemented yet; just report and move on.
           exit 0
