@@ -31,7 +31,8 @@ pipeline {
 
         stage('Auth to EKS') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set -euo pipefail
                     aws sts get-caller-identity
                     aws eks update-kubeconfig \
@@ -44,7 +45,8 @@ pipeline {
 
         stage('Preflight') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set -euo pipefail
                     echo "== tool versions =="
                     kubectl version --client=true
@@ -68,7 +70,8 @@ pipeline {
         stage('Deploy') {
             when { expression { params.ACTION == 'deploy' } }
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set -euo pipefail
                     chmod +x setup-kubernetes-goat.sh
                     bash setup-kubernetes-goat.sh
@@ -79,7 +82,8 @@ pipeline {
         stage('Verify') {
             when { expression { params.ACTION == 'deploy' } }
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set -euo pipefail
                     echo "== pods in ${GOAT_NAMESPACE} =="
                     kubectl -n "${GOAT_NAMESPACE}" get pods
@@ -97,7 +101,8 @@ pipeline {
                 }
             }
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set +e
                     if command -v trivy >/dev/null 2>&1; then
                       trivy k8s --namespace "${GOAT_NAMESPACE}" --report summary --scanners misconfig \
@@ -114,7 +119,8 @@ pipeline {
         stage('Destroy') {
             when { expression { params.ACTION == 'destroy' } }
             steps {
-                sh '''
+                sh '''#!/bin/bash
+
                     set +e
                     chmod +x teardown-kubernetes-goat.sh
                     bash teardown-kubernetes-goat.sh
